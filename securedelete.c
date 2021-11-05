@@ -20,7 +20,10 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <sys/syscall.h>
+
+#include "speck.h"
 
 #define USAGE "usage: %s [-n] [-v] [-f fillval] filesystem\n"
 
@@ -36,6 +39,8 @@ int main(int argc, char **argv)
 	unsigned char *buf;
 	unsigned char *empty;
 	unsigned char *random;
+	uint64_t key[4];
+	uint64_t nonce[2] = {0, 0};
 	int i, c ;
 	unsigned int free_count, modified ;
 	double percent ;
@@ -108,6 +113,7 @@ int main(int argc, char **argv)
 
 	memset(empty, fillval, current_fs->blocksize);
 	syscall(SYS_getrandom, random, current_fs->blocksize, 0);
+	//syscall(SYS_getrandom, &key, sizeof(key), 0);
 
 	ret = ext2fs_read_inode_bitmap(current_fs);
 	if ( ret ) {
@@ -158,6 +164,7 @@ int main(int argc, char **argv)
 			}
 		}
 
+
 		if ( i == current_fs->blocksize ) {
 			continue ;
 		}
@@ -165,12 +172,14 @@ int main(int argc, char **argv)
 		++modified ;
 
 		if ( !dryrun ) {
+			//speck_ctr((uint64_t*)random, (uint64_t*)buf, current_fs->blocksize, key, nonce); 
 			ret = io_channel_write_blk(current_fs->io, blk, 1, random) ;
 			if ( ret ) {
 				fprintf(stderr, "%s: error while writing block\n", argv[0]) ;
 				return 1 ;
 			}
 			syscall(SYS_getrandom, random, current_fs->blocksize, 0);
+			//syscall(SYS_getrandom, &key, sizeof(key), 0);
 		}
 	}
 
