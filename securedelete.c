@@ -8,16 +8,19 @@
  *
  * Changes:
  *
+ * 2021-11-5   Changed to randomize blocks instead of zeroing them. Patch from Austen Barker
  * 2010-10-17  Allow non-zero fill value.   Patch from Jacob Nevins.
  * 2007-08-12  Allow use on filesystems mounted read-only.   Patch from
  *             Jan Krämer.
  */
 
+//need to install e2fslibs-dev on ubuntu for this
 #include <ext2fs/ext2fs.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/syscall.h>
 
 #define USAGE "usage: %s [-n] [-v] [-f fillval] filesystem\n"
 
@@ -32,8 +35,9 @@ int main(int argc, char **argv)
 	unsigned long blk ;
 	unsigned char *buf;
 	unsigned char *empty;
+	unsigned char *random;
 	int i, c ;
-	unsigned int free, modified ;
+	unsigned int free_count, modified ;
 	double percent ;
 	int old_percent ;
 	unsigned int fillval = 0 ;
@@ -94,14 +98,16 @@ int main(int argc, char **argv)
 	}
 
 	empty = (unsigned char *)malloc(current_fs->blocksize) ;
+	random = (unsigned char *)malloc(current_fs->blocksize) ;
 	buf = (unsigned char *)malloc(current_fs->blocksize) ;
 
-	if ( empty == NULL || buf == NULL ) {
+	if ( empty == NULL || buf == NULL || random == NULL ) {
 		fprintf(stderr, "%s: out of memory (surely not?)\n", argv[0]) ;
 		return 1 ;
 	}
 
 	memset(empty, fillval, current_fs->blocksize);
+	syscall(SYS_getrandom, random, current_fs->blocksize, 0);
 
 	ret = ext2fs_read_inode_bitmap(current_fs);
 	if ( ret ) {
@@ -115,7 +121,7 @@ int main(int argc, char **argv)
 		return 1 ;
 	}
 
-	free = modified = 0 ;
+	free_count = modified = 0 ;
 	percent = 0.0 ;
 	old_percent = -1 ;
 
@@ -130,9 +136,9 @@ int main(int argc, char **argv)
 			continue ;
 		}
 
-		++free ;
+		++free_count ;
 
-		percent = 100.0 * (double)free/
+		percent = 100.0 * (double)free_count/
 					(double)current_fs->super->s_free_blocks_count ;
 
 		if ( verbose && (int)(percent*10) != old_percent ) {
@@ -159,16 +165,17 @@ int main(int argc, char **argv)
 		++modified ;
 
 		if ( !dryrun ) {
-			ret = io_channel_write_blk(current_fs->io, blk, 1, empty) ;
+			ret = io_channel_write_blk(current_fs->io, blk, 1, random) ;
 			if ( ret ) {
 				fprintf(stderr, "%s: error while writing block\n", argv[0]) ;
 				return 1 ;
 			}
+			syscall(SYS_getrandom, random, current_fs->blocksize, 0);
 		}
 	}
 
 	if ( verbose ) {
-		printf("\r%u/%u/%u\n", modified, free,
+		printf("\r%u/%u/%u\n", modified, free_count,
 				current_fs->super->s_blocks_count) ;
 	}
 
@@ -178,5 +185,8 @@ int main(int argc, char **argv)
 		return 1 ;
 	}
 
+	free(empty);
+	free(random);
+	free(buf);
 	return 0 ;
 }
